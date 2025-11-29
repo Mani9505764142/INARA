@@ -1,0 +1,34 @@
+[
+  {
+    "id": "p1",
+    "name": "Royal Kundan Bangles Set",
+    "price": 1599,
+    "category": "bangles",
+    "images": ["/images/p1.jpg"],
+    "description": "Elegant handcrafted bangles embellished with premium Kundan stones arranged in floral patterns. Perfect for weddings and festive wear."
+  },
+  {
+    "id": "p2",
+    "name": "Pink Silk Thread Kundan Bangle Set",
+    "price": 1299,
+    "category": "bangles",
+    "images": ["/images/p2.jpg"],
+    "description": "Handcrafted silk thread bangles decorated with Kundan stones, antique coin motifs, and golden detailing. A perfect festive and bridal accessory."
+  },
+  {
+    "id": "p3",
+    "name": "Green Silk Thread Kundan Bangle Set",
+    "price": 1199,
+    "category": "bangles",
+    "images": ["/images/p3.jpg"],
+    "description": "Beautiful silk thread bangle set in deep emerald green, embellished with premium Kundan clusters and gold-toned motifs. Ideal for ethnic and festive outfits."
+  },
+  {
+    "id": "p4",
+    "name": "Red Silk Thread Kundan Kada",
+    "price": 999,
+    "category": "bangles",
+    "images": ["/images/p4.jpg"],
+    "description": "Stunning handcrafted red silk thread kada with floral Kundan work and elegant golden motifs. A perfect statement piece for bridal and festive occasions."
+  }
+]
