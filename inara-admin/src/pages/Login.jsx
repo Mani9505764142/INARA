@@ -9,25 +9,42 @@ import {
   Alert,
 } from "@mui/material";
 import api from "../api/client";
+import { useNavigate } from "react-router-dom";
 
 export default function LoginPage({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
+
     try {
-      const res = await api.post("/admin/login", { username, password });
-      const token = res.data?.token;
-      if (!token) throw new Error("No token returned");
-      onLogin(token);
+      // cookie-based login endpoint (server sets HttpOnly cookie)
+      const res = await api.post("/admin/login-cookie", { username, password });
+
+      // if server responded non-OK, axios will throw — but double-check:
+      if (res.data?.success) {
+        // onLogin can be used to update parent state (optional)
+        if (typeof onLogin === "function") onLogin();
+
+        // navigate to admin dashboard
+        navigate("/admin/dashboard");
+      } else {
+        // show server-provided message if any
+        throw new Error(res.data?.message || "Login failed");
+      }
     } catch (err) {
       console.error("Login failed:", err);
-      setError("Invalid credentials");
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        "Network or server error";
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -54,7 +71,11 @@ export default function LoginPage({ onLogin }) {
           </Alert>
         )}
 
-        <Box component="form" onSubmit={handleSubmit} sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <Box
+          component="form"
+          onSubmit={handleSubmit}
+          sx={{ display: "flex", flexDirection: "column", gap: 2 }}
+        >
           <TextField
             label="Username"
             size="small"
