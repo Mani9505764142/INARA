@@ -47,7 +47,7 @@ const orderSchema = new mongoose.Schema(
     },
 
     paymentId: { type: String }, // razorpay payment id (pay_...)
-    paymentOrderId: { type: String, index: true }, // razorpay order id (order_...) - indexed
+    paymentOrderId: { type: String }, // razorpay order id (order_...) - index defined below
     paymentSignature: { type: String },
 
     status: {
@@ -59,9 +59,10 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Optional: unique index on paymentOrderId if you guarantee 1:1 mapping
-// If you create DB order first and then create Razorpay order for same DB order,
-// you can enforce uniqueness to avoid duplicates.
-orderSchema.index({ paymentOrderId: 1 }, { unique: true, partialFilterExpression: { paymentOrderId: { $type: "string" } } });
+// Explicit index: keep this single index definition (unique + partial)
+orderSchema.index(
+  { paymentOrderId: 1 },
+  { unique: true, partialFilterExpression: { paymentOrderId: { $type: "string" } } }
+);
 
 module.exports = mongoose.model("Order", orderSchema);
