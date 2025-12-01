@@ -1,7 +1,7 @@
 // src/controllers/paymentController.js
 const crypto = require("crypto");
 const razorpay = require("../config/razorpay");
-const Order = require("../models/Order"); // adjust path if your model is elsewhere
+const Order = require("../models/Order");
 
 const toNumber = (v) => {
   if (typeof v === "number") return v;
@@ -14,24 +14,54 @@ const toNumber = (v) => {
 
 /**
  * createOrder
+ * - Validates input strictly (returns clear 400 errors)
  * - Creates a Razorpay order
  * - Creates a local DB order with paymentStatus: "PENDING" and paymentOrderId set
- * - Returns { orderId, order (razorpay order), key_id }
+ * - Returns { success: true, orderId, order (razorpay), key_id }
  */
 exports.createOrder = async (req, res) => {
   try {
-    const { amount, customerName, phone, address, items } = req.body;
-
-    if (amount === undefined || amount === null) {
-      return res.status(400).json({ error: "Amount required (in rupees or paise)" });
+    // Guard: empty or malformed body
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({ error: "Empty request body" });
     }
 
+    // Safe destructure
+    const {
+      amount,
+      subtotal,
+      total,
+      shippingFee,
+      items,
+      customerName,
+      phone,
+      address,
+      pincode
+    } = req.body;
+
+    // Validate required fields with explicit errors
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "items is required and must be a non-empty array" });
+    }
+    if (subtotal === undefined || subtotal === null || Number.isNaN(Number(subtotal))) {
+      return res.status(400).json({ error: "subtotal is required and must be a number" });
+    }
+    if (total === undefined || total === null || Number.isNaN(Number(total))) {
+      return res.status(400).json({ error: "total is required and must be a number" });
+    }
+    if (!pincode) {
+      return res.status(400).json({ error: "pincode is required" });
+    }
+    if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
+      return res.status(400).json({ error: "amount is required and must be a number" });
+    }
+
+    // Normalize & validate amount
     const n = toNumber(amount);
     if (!Number.isFinite(n) || n <= 0) {
       return res.status(400).json({ error: "Invalid amount" });
     }
-
-    // Treat <1000 as rupees, else assume paise
+    // convert to paise if rupees (heuristic: <1000 => rupees)
     const amountInPaise = n < 1000 ? Math.round(n * 100) : Math.round(n);
 
     const options = {
@@ -41,25 +71,37 @@ exports.createOrder = async (req, res) => {
       payment_capture: 1
     };
 
-    // create razorpay order
+    // Create Razorpay order
     const rpOrder = await razorpay.orders.create(options);
 
-    // create a pending order in DB - idempotent if frontend retries createOrder (you can use receipt to dedupe)
-    const orderDoc = await Order.create({
-      items: items || [],
-      customerName: customerName || null,
+    // Build DB order payload
+    const orderDocPayload = {
+      items: items,
+      customerName: customerName || "Customer",
       phone: phone || null,
       address: address || null,
-      amount: n, // store as rupees if input was rupees, else paise numeric; consistent with your app
+      pincode,
+      shippingFee: Number(shippingFee || 0),
+      subtotal: Number(subtotal),
+      total: Number(total),
+      amount: Number(amount),
       paymentOrderId: rpOrder.id,
       paymentStatus: "PENDING",
       status: "PENDING",
       createdAt: new Date()
-    });
+    };
+
+    // Safety check before save
+    if (!Number.isFinite(orderDocPayload.subtotal) || !Number.isFinite(orderDocPayload.total)) {
+      return res.status(400).json({ error: "Invalid subtotal or total" });
+    }
+
+    // Create DB order
+    const order = await Order.create(orderDocPayload);
 
     return res.json({
       success: true,
-      orderId: orderDoc._id.toString(),
+      orderId: order._id.toString(),
       order: rpOrder,
       key_id: process.env.RAZORPAY_KEY_ID || null
     });
@@ -71,12 +113,16 @@ exports.createOrder = async (req, res) => {
 
 /**
  * verifyPayment
- * - Validates HMAC signature
+ * - Validates Razorpay HMAC signature with server secret
  * - Atomically marks DB order as PAID (idempotent)
  * - Returns { ok: true, orderId } on success
  */
 exports.verifyPayment = async (req, res) => {
   try {
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({ ok: false, error: "Empty request body" });
+    }
+
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -91,7 +137,7 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid signature" });
     }
 
-    // atomic update: set PAID only if not already PAID
+    // Atomic update - set PAID only if not already PAID
     const updated = await Order.findOneAndUpdate(
       { paymentOrderId: razorpay_order_id, paymentStatus: { $ne: "PAID" } },
       {
@@ -107,11 +153,10 @@ exports.verifyPayment = async (req, res) => {
     );
 
     if (updated) {
-      // success: order was found and updated to PAID
       return res.json({ ok: true, orderId: updated._id.toString() });
     }
 
-    // maybe it's already paid or not found. handle both
+    // If not updated, check whether it was already paid
     const maybe = await Order.findOne({ paymentOrderId: razorpay_order_id }).lean();
     if (maybe && maybe.paymentStatus === "PAID") {
       return res.json({ ok: true, orderId: maybe._id.toString() });
