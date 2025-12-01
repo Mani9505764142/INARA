@@ -1,17 +1,25 @@
 // src/api/client.js
 import axios from "axios";
 
+// Backend API base URL comes from Netlify build env
+const baseURL = import.meta.env.VITE_API_URL || "/api";
+
 const api = axios.create({
-  baseURL: "http://localhost:5000/api",
+  baseURL,
+  withCredentials: true, // CRITICAL — send & receive cookies
+  timeout: 15000,
 });
 
-// attach token on each request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("kanha_admin_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+// Optional: normalize axios error messages
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const msg =
+      error.response?.data?.message ||
+      error.message ||
+      "Network or server error";
+    return Promise.reject({ ...error, message: msg });
   }
-  return config;
-});
+);
 
 export default api;
