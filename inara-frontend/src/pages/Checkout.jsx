@@ -152,6 +152,7 @@ export default function CheckoutPage() {
       shippingFee,
       subtotal: itemsTotal,
       total: total,
+      amount: total,
     };
 
     try {
