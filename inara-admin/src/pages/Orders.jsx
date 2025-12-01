@@ -46,25 +46,27 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
 
   // -----------------------------
-  // LOAD ORDERS (Admin protected)
+  // LOAD ORDERS (Admin protected via cookie)
   // -----------------------------
   const loadOrders = async () => {
     try {
       setLoading(true);
 
-      const token = localStorage.getItem("adminToken");
-      if (!token) {
-        console.error("Admin token missing.");
-        return;
-      }
+      // Use axios client withCredentials; do NOT send Authorization header from localStorage
+      const res = await api.get("/orders");
 
-      const res = await api.get("/orders", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // backend may return { success: true, data: [...] } or an array directly.
+      let data = [];
+      if (Array.isArray(res.data)) data = res.data;
+      else if (res.data?.data) data = res.data.data;
+      else if (res.data?.orders) data = res.data.orders;
+      else if (res.data?.success && res.data?.payload) data = res.data.payload;
+      else data = Array.isArray(res.data) ? res.data : [];
 
-      setOrders(Array.isArray(res.data) ? res.data : []);
+      setOrders(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Failed to load orders:", err);
+      setOrders([]);
     } finally {
       setLoading(false);
     }
@@ -72,6 +74,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -79,18 +82,14 @@ export default function OrdersPage() {
   }, [statusFilter, search]);
 
   // --------------------------------
-  // UPDATE ORDER STATUS (PATCH FIXED)
+  // UPDATE ORDER STATUS (PATCH)
   // --------------------------------
   const handleStatusChange = async (orderId, status) => {
     try {
       setSavingId(orderId);
-      const token = localStorage.getItem("adminToken");
 
-      await api.patch(
-        `/orders/${orderId}/status`,
-        { status },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // Use cookie auth - api client sends cookie automatically
+      await api.patch(`/orders/${orderId}/status`, { status });
 
       setOrders((prev) =>
         prev.map((o) => (o._id === orderId ? { ...o, status } : o))
@@ -107,12 +106,9 @@ export default function OrdersPage() {
   // INVOICE DOWNLOAD HANDLER
   // --------------------------
   const handleDownloadInvoice = async (orderId) => {
-    const token = localStorage.getItem("adminToken");
-
     try {
       const res = await api.get(`/orders/${orderId}/invoice`, {
         responseType: "blob",
-        headers: { Authorization: `Bearer ${token}` },
       });
 
       const blob = new Blob([res.data], { type: "application/pdf" });
@@ -145,11 +141,13 @@ export default function OrdersPage() {
     const s = (status || "PENDING").toUpperCase();
     const colorMap = {
       PENDING: "warning",
+      CONFIRMED: "info", // DB uses CONFIRMED for paid/confirmed orders
       SHIPPED: "info",
       DELIVERED: "success",
       CANCELLED: "error",
     };
-    return <Chip label={s} color={colorMap[s]} size="small" />;
+    const color = colorMap[s] || "default";
+    return <Chip label={s} color={color} size="small" />;
   };
 
   // --------------------------
@@ -173,7 +171,9 @@ export default function OrdersPage() {
 
     return orders.filter((o) => {
       if (statusFilter !== "ALL") {
-        if ((o.status || "PENDING").toUpperCase() !== statusFilter) return false;
+        // normalize status from backend and compare
+        const s = (o.status || "PENDING").toUpperCase();
+        if (s !== statusFilter) return false;
       }
 
       if (term) {
@@ -226,6 +226,7 @@ export default function OrdersPage() {
         >
           <ToggleButton value="ALL">All</ToggleButton>
           <ToggleButton value="PENDING">Pending</ToggleButton>
+          <ToggleButton value="CONFIRMED">Confirmed</ToggleButton>
           <ToggleButton value="SHIPPED">Shipped</ToggleButton>
           <ToggleButton value="DELIVERED">Delivered</ToggleButton>
           <ToggleButton value="CANCELLED">Cancelled</ToggleButton>
@@ -299,6 +300,7 @@ export default function OrdersPage() {
                             sx={{ minWidth: 110 }}
                           >
                             <MenuItem value="PENDING">Pending</MenuItem>
+                            <MenuItem value="CONFIRMED">Confirmed</MenuItem>
                             <MenuItem value="SHIPPED">Shipped</MenuItem>
                             <MenuItem value="DELIVERED">Delivered</MenuItem>
                             <MenuItem value="CANCELLED">Cancelled</MenuItem>
