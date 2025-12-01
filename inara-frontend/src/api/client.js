@@ -1,10 +1,11 @@
 import axios from "axios";
 
+const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, ""); 
+// removes trailing slash if user added it accidentally
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL + "/api",
-  // Example: "https://inara-sazc.onrender.com/api"
-  timeout: 15000,
-  withCredentials: false
+  baseURL: `${API}/api`,
+  timeout: 30000, // give Render enough time (cold start)
 });
 
 export default api;
