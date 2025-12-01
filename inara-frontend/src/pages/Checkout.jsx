@@ -30,8 +30,7 @@ export default function CheckoutPage() {
 
   // subtotal, shipping, total
   const itemsTotal =
-    items?.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0) ||
-    0;
+    items?.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0) || 0;
   const shippingFee = items && items.length > 0 ? SHIPPING_FEE : 0;
   const total = itemsTotal + shippingFee;
 
@@ -41,91 +40,87 @@ export default function CheckoutPage() {
   };
 
   // Opens Razorpay checkout and handles responses.
-  const openRazorpayAndPay = async ({ orderDbId, amountPaise, customer }) => {
-    try {
-      // 2) create razorpay order via backend
-      const payOrderResp = await api.post(
-        "/payment/create-order",
-        { amount: amountPaise },
-        { headers: { "Content-Type": "application/json" } }
-      );
-
-      const { order, key_id } = payOrderResp.data || payOrderResp; // support axios or fetch shapes
-      if (!order || !key_id) throw new Error("Failed to create payment order");
-
-      if (!window.Razorpay) {
-        throw new Error(
-          "Razorpay SDK not loaded. Ensure <script src='https://checkout.razorpay.com/v1/checkout.js'></script> is present in public/index.html"
-        );
-      }
-
-      const options = {
-        key: key_id,
-        amount: order.amount,
-        currency: order.currency,
-        // Brand shown in the Razorpay modal header — changed to INARA
-        name: "INARA",
-        // Short description that appears under the name
-        description: `INARA — Order ${orderDbId || ""}`,
-        // Optional: add an image/logo URL if you have one (uncomment and set your URL)
-        // image: "https://your-cdn.com/path/to/inara-logo.png",
-        order_id: order.id, // razorpay order id
-        handler: async function (response) {
-          // called when payment succeeds
-          try {
-            setLoading(true);
-            // 4) verify on server
-            const verifyResp = await api.post("/payment/verify-payment", response);
-            const verifyResult = verifyResp.data || verifyResp;
-
-            if (verifyResult && verifyResult.ok) {
-              // 5) patch your DB order as paid (new endpoint)
-              if (orderDbId) {
-                await api.patch(`/orders/${orderDbId}/pay`, {
-                  paymentId: response.razorpay_payment_id,
-                  paymentOrderId: response.razorpay_order_id,
-                  paymentSignature: response.razorpay_signature,
-                  paymentStatus: "PAID",
-                });
-              }
-
-              clearCart();
-              navigate("/order-success", { state: { orderId: orderDbId || "" } });
-            } else {
-              alert("Payment verification failed. Please contact support.");
-            }
-          } catch (err) {
-            console.error("Post-payment finalize error:", err);
-            alert("Payment processed but finalization failed. Contact support.");
-          } finally {
-            setLoading(false);
-          }
-        },
-        prefill: {
-          name: customer?.customerName || "",
-          email: customer?.email || "",
-          contact: customer?.phone || "",
-        },
-        theme: {
-          color: "#0f172a",
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on("payment.failed", (err) => {
-        console.error("Payment failed:", err);
-        alert("Payment failed: " + (err.error?.description || "Unknown"));
-        setLoading(false);
-      });
-      rzp.open();
-    } catch (err) {
-      console.error("openRazorpay error:", err);
-      setLoading(false);
-      throw err;
+  // rpOrder: razorpay order object returned by server
+  // key_id: razorpay client key returned by server
+  const openRazorpayAndPay = async ({ orderDbId, rpOrder, key_id, customer }) => {
+    if (!rpOrder || !key_id) {
+      throw new Error("Missing payment order or key from server");
     }
+
+    if (!window.Razorpay) {
+      throw new Error(
+        "Razorpay SDK not loaded. Ensure <script src='https://checkout.razorpay.com/v1/checkout.js'></script> is present in public/index.html"
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const options = {
+          key: key_id,
+          amount: rpOrder.amount,
+          currency: rpOrder.currency,
+          name: "INARA",
+          description: `INARA — Order ${orderDbId || ""}`,
+          order_id: rpOrder.id,
+          handler: async function (response) {
+            // Called when payment succeeds in the Razorpay popup.
+            try {
+              setLoading(true);
+              // Verify on server: server will atomically mark DB order PAID if signature valid
+              const verifyResp = await api.post("/payment/verify-payment", {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+
+              const verifyResult = verifyResp.data || verifyResp;
+              if (verifyResp.status === 200 && verifyResult && verifyResult.ok) {
+                const finalOrderId = verifyResult.orderId || orderDbId;
+                // success: clear cart and redirect to confirmed page
+                clearCart();
+                setLoading(false);
+                navigate("/order-success", { state: { orderId: finalOrderId } });
+                resolve({ ok: true, orderId: finalOrderId });
+              } else {
+                console.error("Payment verification failed:", verifyResult);
+                setLoading(false);
+                alert("Payment verification failed. Please contact support.");
+                resolve({ ok: false, error: verifyResult });
+              }
+            } catch (err) {
+              console.error("Post-payment finalize error:", err);
+              setLoading(false);
+              alert("Payment processed but finalization failed. Contact support.");
+              resolve({ ok: false, error: err });
+            }
+          },
+          prefill: {
+            name: customer?.customerName || "",
+            email: customer?.email || "",
+            contact: customer?.phone || "",
+          },
+          theme: {
+            color: "#0f172a",
+          },
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on("payment.failed", (err) => {
+          console.error("Payment failed:", err);
+          alert("Payment failed: " + (err.error?.description || "Unknown"));
+          setLoading(false);
+          resolve({ ok: false, error: err });
+        });
+        rzp.open();
+      } catch (err) {
+        console.error("openRazorpay error:", err);
+        setLoading(false);
+        reject(err);
+      }
+    });
   };
 
-  // Submit (create DB order first -> open Razorpay)
+  // Submit (create DB order on server -> server creates razorpay order -> open Razorpay)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -146,7 +141,6 @@ export default function CheckoutPage() {
       price: item.price,
     }));
 
-    // IMPORTANT: use uppercase enum values (backend expects PENDING/PAID/etc)
     const payload = {
       items: itemsPayload,
       customerName: form.customerName,
@@ -154,7 +148,7 @@ export default function CheckoutPage() {
       address: form.address,
       pincode: form.pincode,
       paymentMethod: "ONLINE",
-      paymentStatus: "PENDING", // <-- correct enum
+      paymentStatus: "PENDING",
       shippingFee,
       subtotal: itemsTotal,
       total: total,
@@ -163,24 +157,25 @@ export default function CheckoutPage() {
     try {
       setLoading(true);
 
-      // 1) create order record on server (status: PENDING)
-      const res = await api.post("/orders", payload);
-      const created = res.data || res;
-      // try to pick different shapes returned by different implementations
-      const orderDbId =
-        created.orderId || created._id || created.id || (created.order && created.order._id);
+      // NEW FLOW: call server endpoint that creates BOTH a pending DB order and a Razorpay order
+      // Server returns { orderId, order (razorpay order), key_id }
+      const payOrderResp = await api.post("/payment/create-order", payload, {
+        headers: { "Content-Type": "application/json" },
+      });
 
-      if (!orderDbId) {
-        console.error("Unexpected order create response:", created);
-        throw new Error("Failed to create order on server");
+      const data = payOrderResp.data || payOrderResp;
+      const orderDbId = data.orderId || data.orderId || data._id || (data.order && data.order._id);
+      const rpOrder = data.order;
+      const key_id = data.key_id || data.keyId || data.key;
+
+      if (!orderDbId || !rpOrder || !key_id) {
+        console.error("Unexpected create-order response:", data);
+        throw new Error("Failed to create payment order on server");
       }
 
-      // amount in paise (integer)
-      const amountPaise = Math.round(Number(total) * 100);
-
-      // 2..n) open Razorpay -> verify -> finalize
-      await openRazorpayAndPay({ orderDbId, amountPaise, customer: form });
-      // finish handled by handler
+      // open Razorpay with server-supplied rpOrder & key_id
+      await openRazorpayAndPay({ orderDbId, rpOrder, key_id, customer: form });
+      // finalization (clearCart, navigate) handled in handler
     } catch (err) {
       console.error("Checkout error:", err);
       setError(err.message || "Something went wrong while placing your order.");
@@ -268,3 +263,4 @@ export default function CheckoutPage() {
     </Container>
   );
 }
+
