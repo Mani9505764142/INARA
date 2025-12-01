@@ -2,17 +2,57 @@
 const crypto = require("crypto");
 const razorpay = require("../config/razorpay");
 
+const toNumber = (v) => {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v.trim());
+    return Number.isFinite(n) ? n : NaN;
+  }
+  return NaN;
+};
+
 exports.createOrder = async (req, res) => {
   try {
-    const { amount } = req.body;
-    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: "Amount required (in paise)" });
+    let { amount } = req.body;
 
-    const options = { amount: Number(amount), currency: "INR", receipt: `rcpt_${Date.now()}`, payment_capture: 1 };
+    if (amount === undefined || amount === null) {
+      return res.status(400).json({ error: "Amount required (in rupees or paise)" });
+    }
+
+    // Accept either paise (e.g. 84000) OR rupees (e.g. 840).
+    // Heuristic: if value > 1000 assume it's already paise; otherwise assume rupees.
+    const n = toNumber(amount);
+    if (!Number.isFinite(n) || n <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    // Convert to paise if it looks like rupees (<= 100000 maybe rupees)
+    let amountInPaise = n;
+    if (n < 1000) {
+      // treat as rupees
+      amountInPaise = Math.round(n * 100);
+    } else {
+      // probably already in paise
+      amountInPaise = Math.round(n);
+    }
+
+    const options = {
+      amount: amountInPaise,
+      currency: "INR",
+      receipt: `rcpt_${Date.now()}`,
+      payment_capture: 1
+    };
+
     const order = await razorpay.orders.create(options);
-    return res.json({ order, key_id: process.env.RAZORPAY_KEY_ID });
+
+    return res.json({
+      success: true,
+      order,
+      key_id: process.env.RAZORPAY_KEY_ID || null
+    });
   } catch (err) {
-    console.error("Order Error:", err);
-    return res.status(500).json({ error: "Order creation failed" });
+    console.error("createOrder failed:", err && (err.stack || err.message || err));
+    return res.status(500).json({ error: err && err.message ? err.message : "Order creation failed" });
   }
 };
 
@@ -27,7 +67,7 @@ exports.verifyPayment = async (req, res) => {
     if (expected === razorpay_signature) return res.json({ ok: true });
     return res.status(400).json({ ok: false, error: "Invalid signature" });
   } catch (err) {
-    console.error("Verify Error:", err);
-    return res.status(500).json({ error: "Verification failed" });
+    console.error("verifyPayment failed:", err && (err.stack || err.message || err));
+    return res.status(500).json({ error: err && err.message ? err.message : "Verification failed" });
   }
 };
