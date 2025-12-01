@@ -4,10 +4,10 @@ const router = express.Router();
 const { adminLogin } = require("../controllers/adminController");
 const { requireAdminAuth } = require("../middleware/adminAuth");
 
-// PUBLIC ROUTE
+// public
 router.post("/login", adminLogin);
 
-// PROTECTED ROUTE EXAMPLE
+// protected (example)
 router.get("/orders", requireAdminAuth, async (req, res) => {
   return res.json({
     success: true,
