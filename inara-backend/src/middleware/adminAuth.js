@@ -3,13 +3,13 @@ const jwt = require("jsonwebtoken");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.warn("⚠ JWT_SECRET is not set in environment. Admin auth will use a weak fallback.");
+  console.warn("⚠ WARNING: JWT_SECRET is not set in environment. Using fallback.");
 }
 
 exports.requireAdminAuth = (req, res, next) => {
   try {
-    const auth = req.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
     if (!token) {
       return res.status(401).json({ success: false, message: "Missing auth token" });
@@ -27,9 +27,9 @@ exports.requireAdminAuth = (req, res, next) => {
     }
 
     req.admin = payload;
-    return next();
+    next();
   } catch (err) {
-    console.error("Admin auth error:", err);
+    console.error("Admin auth error:", err.message);
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
 };
