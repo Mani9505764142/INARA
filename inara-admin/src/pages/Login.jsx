@@ -18,24 +18,62 @@ export default function LoginPage({ onLogin }) {
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
+  const storeTokenIfPresent = (res) => {
+    const token =
+      res?.data?.token || res?.data?.data?.token || res?.data?.accessToken;
+    if (token) {
+      try {
+        localStorage.setItem("adminToken", token);
+        api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      } catch (e) {
+        // ignore storage errors
+      }
+      return true;
+    }
+    return false;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
 
     try {
-      // cookie-based login endpoint (server sets HttpOnly cookie)
-      const res = await api.post("/admin/login-cookie", { username, password });
+      // 1) Try token-based login first (recommended)
+      // Many backends return { success: true, token: "..." } or similar.
+      try {
+        const tokenRes = await api.post("/admin/login", { username, password });
+        const got = storeTokenIfPresent(tokenRes);
+        if (got) {
+          if (typeof onLogin === "function") onLogin();
+          navigate("/admin/dashboard");
+          return;
+        }
+        // If token endpoint responded with success but no token, continue to cookie fallback below.
+        if (tokenRes?.data?.success) {
+          if (typeof onLogin === "function") onLogin();
+          navigate("/admin/dashboard");
+          return;
+        }
+      } catch (tokenErr) {
+        // token endpoint might 404 or throw — ignore and try cookie fallback
+        // console.warn('Token login failed', tokenErr);
+      }
 
-      // if server responded non-OK, axios will throw — but double-check:
+      // 2) Fallback to cookie-based login endpoint (your original flow)
+      const res = await api.post(
+        "/admin/login-cookie",
+        { username, password },
+        { withCredentials: true } // cookie flow requires credentials
+      );
+
+      // If token present here, store it too (defensive)
+      storeTokenIfPresent(res);
+
       if (res.data?.success) {
-        // onLogin can be used to update parent state (optional)
         if (typeof onLogin === "function") onLogin();
-
-        // navigate to admin dashboard
         navigate("/admin/dashboard");
       } else {
-        // show server-provided message if any
         throw new Error(res.data?.message || "Login failed");
       }
     } catch (err) {
