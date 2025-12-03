@@ -1,4 +1,3 @@
-// src/pages/Products.jsx
 import React, { useEffect, useState } from "react";
 import {
   Box,
@@ -44,7 +43,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState(null); // product being edited or null
+  const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_PRODUCT);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -154,10 +153,11 @@ export default function ProductsPage() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      if (res.data?.url) {
-        handleFormChange("imageUrl", res.data.url);
+      // ✅ FIXED — use imageUrl returned from backend
+      if (res.data?.imageUrl) {
+        handleFormChange("imageUrl", res.data.imageUrl);
       } else {
-        alert("Upload failed: no URL returned");
+        alert("Upload failed: no imageUrl returned");
       }
     } catch (err) {
       console.error("Image upload error:", err);
